@@ -38,7 +38,7 @@ if _ENV_FILE.exists():
     load_dotenv(dotenv_path=_ENV_FILE, override=False)
 
 # ── 상수 ──────────────────────────────────────────────────────────────────────
-GRIDSHIFTER_API = os.environ.get("GRIDSHIFTER_API", "http://localhost:8000")
+GRIDSHIFTER_API = os.environ.get("GRIDSHIFTER_API", "https://gridshifter-production.up.railway.app")
 RUNPOD_API_KEY  = os.environ.get("RUNPOD_API_KEY", "")
 LAMBDA_API_KEY  = os.environ.get("LAMBDA_LABS_API_KEY", "")
 
@@ -147,28 +147,38 @@ _GPU_MAP: dict[str, dict] = {
 _active_instance: dict = {}   # {"provider": ..., "id": ..., "name": ...}
 
 def _cleanup_on_exit() -> None:
-    """프로그램 종료 시 인스턴스 자동 종료 (--auto-terminate 플래그 ON 시)."""
-    if not _active_instance.get("auto_terminate"):
+    """프로그램 종료 시 인스턴스 정리.
+    
+    - --auto-terminate 플래그 ON: 무조건 종료
+    - Ctrl+C 등으로 종료 시 인스턴스가 있으면 항상 종료 (과금 방지)
+    """
+    if _active_instance.get("skip_atexit"):
         return
     provider = _active_instance.get("provider", "")
     inst_id  = _active_instance.get("id", "")
     if not inst_id:
         return
-    warn(f"자동 종료 실행 중: {provider} / {inst_id}")
+    warn(f"인스턴스 정리 중: {provider} / {inst_id}")
     try:
         if provider == "RunPod":
             _runpod_terminate(inst_id)
         elif provider == "LambdaLabs":
             _lambda_terminate(inst_id)
-        ok("인스턴스 종료 완료")
+        ok("인스턴스 종료 완료 — 과금 중단됨")
     except Exception as exc:
-        err(f"자동 종료 실패 (수동으로 종료하세요): {exc}")
+        err(f"자동 종료 실패 — 수동 종료 필요: {exc}")
+        err(f"  RunPod: https://www.runpod.io/console/pods")
+        err(f"  Lambda: https://cloud.lambdalabs.com/instances")
 
 atexit.register(_cleanup_on_exit)
 
 def _handle_sigint(sig, frame) -> None:
     print()
-    warn("Ctrl+C 감지 — 정리 중…")
+    inst_id = _active_instance.get("id", "")
+    if inst_id:
+        warn(f"Ctrl+C 감지 — 실행 중인 인스턴스({inst_id}) 종료 후 종료합니다…")
+    else:
+        warn("Ctrl+C 감지 — 종료합니다.")
     sys.exit(0)
 
 signal.signal(signal.SIGINT, _handle_sigint)
@@ -410,7 +420,7 @@ def poll_for_ip(provider: str, instance_id: str) -> str:
     dots     = 0
     get_ip   = runpod_get_ip if provider == "RunPod" else lambda_get_ip
 
-    print(f"  {C.GREY}인스턴스 부팅 대기중", end="", flush=True)
+    print(f"  {C.GREY}인스턴스 부팅 대기 중 (A100 기준 2~4분 소요, Ctrl+C 시 자동 종료)", end="", flush=True)
     while elapsed < POLL_MAX_WAIT:
         ip = get_ip(instance_id)
         if ip:
@@ -418,14 +428,16 @@ def poll_for_ip(provider: str, instance_id: str) -> str:
             return ip
 
         dots = (dots + 1) % 4
-        print(f"\r  {C.GREY}인스턴스 부팅 대기중{'.' * dots}{'  ' * (3 - dots)} ({elapsed}s){C.RESET}", end="", flush=True)
+        print(f"\r  {C.GREY}인스턴스 부팅 대기 중{'.' * dots}{'  ' * (3 - dots)} ({elapsed}s / {POLL_MAX_WAIT}s 최대){C.RESET}", end="", flush=True)
         time.sleep(POLL_INTERVAL)
         elapsed += POLL_INTERVAL
 
     print(f"{C.RESET}")
+    # 타임아웃 시에도 인스턴스는 살아있으므로 IP 없이 결과 반환
     raise TimeoutError(
-        f"{POLL_MAX_WAIT}초 내 인스턴스 준비 완료 안 됨.\n"
-        f"    수동 확인: {provider} 대시보드에서 ID={instance_id}"
+        f"{POLL_MAX_WAIT}초 내 IP 미수신 — 인스턴스는 계속 실행 중일 수 있습니다.\n"
+        f"    Instance ID: {instance_id}\n"
+        f"    대시보드에서 직접 확인: {'https://www.runpod.io/console/pods' if provider == 'RunPod' else 'https://cloud.lambdalabs.com/instances'}"
     )
 
 
@@ -633,7 +645,7 @@ def cmd_run(args: argparse.Namespace) -> None:
                 err(f"자동 종료 실패: {e}")
         t = threading.Thread(target=_auto_terminate_timer, daemon=True)
         t.start()
-        _active_instance["auto_terminate"] = False  # atexit 중복 방지 (스레드가 처리)
+        _active_instance["skip_atexit"] = True  # 타이머 스레드가 처리하므로 atexit 스킵
 
     print()
 

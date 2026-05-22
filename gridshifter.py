@@ -481,8 +481,15 @@ def cmd_run(args: argparse.Namespace) -> None:
     hourly_est = rec["spot_price_usd_per_hour"] * args.count
     total_est  = rec["estimated_total_cost_usd"]
     if total_est > 200:
-        warn(f"예상 비용이 ${total_est:.2f}입니다. 계속하시겠습니까? (Ctrl+C: 취소)")
-        time.sleep(3)
+        warn(f"예상 총 비용: ${total_est:.2f} (${hourly_est:.2f}/hr × {args.hours}h × {args.count}대)")
+        warn("비용이 $200을 초과합니다. 계속하려면 'yes'를 입력하세요.")
+        try:
+            ans = input("  확인 (yes/no): ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            ans = "no"
+        if ans != "yes":
+            warn("취소되었습니다.")
+            return
 
     if args.dry_run:
         print(f"\n{C.YELLOW}[DRY-RUN] 여기까지입니다. --dry-run 없이 실행하면 인스턴스를 생성합니다.{C.RESET}")

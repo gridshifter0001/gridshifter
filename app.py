@@ -132,6 +132,32 @@ app.add_middleware(
 
 _MAX_BODY_BYTES = 64 * 1024  # 64 KB — 악성 대형 바디 차단
 
+# ── 동시 요청 제한 (optimize는 CPU 집약적) ────────────────────────────────
+_OPTIMIZE_CONCURRENCY = int(os.environ.get("OPTIMIZE_CONCURRENCY", "10"))
+_optimize_semaphore = asyncio.Semaphore(_OPTIMIZE_CONCURRENCY)
+
+# ── 간이 IP 기반 레이트 리미터 ────────────────────────────────────────────
+import collections
+_RATE_LIMIT_RPM = int(os.environ.get("RATE_LIMIT_RPM", "30"))  # IP당 분당 최대 요청
+_rate_counters: dict[str, collections.deque] = {}
+_rate_lock = asyncio.Lock()
+
+
+async def _check_rate_limit(ip: str) -> bool:
+    """True = 허용, False = 초과."""
+    if _RATE_LIMIT_RPM <= 0:
+        return True
+    now = time.time()
+    async with _rate_lock:
+        dq = _rate_counters.setdefault(ip, collections.deque())
+        # 1분 이전 항목 제거
+        while dq and now - dq[0] > 60:
+            dq.popleft()
+        if len(dq) >= _RATE_LIMIT_RPM:
+            return False
+        dq.append(now)
+        return True
+
 
 @app.middleware("http")
 async def guard_and_log(request: Request, call_next):
@@ -142,6 +168,16 @@ async def guard_and_log(request: Request, call_next):
             status_code=413,
             content={"error": "Request body too large.", "max_bytes": _MAX_BODY_BYTES},
         )
+
+    # 레이트 리미트 체크 (헬스체크 제외)
+    if request.url.path != "/api/v1/health":
+        client_ip = request.headers.get("x-forwarded-for", request.client.host if request.client else "unknown").split(",")[0].strip()
+        if not await _check_rate_limit(client_ip):
+            return JSONResponse(
+                status_code=429,
+                content={"error": "Too many requests. Please slow down.", "retry_after_seconds": 60},
+                headers={"Retry-After": "60"},
+            )
 
     start = time.perf_counter()
     response = await call_next(request)
@@ -181,7 +217,6 @@ async def health_check():
         "service": "GridShifter AI",
         "version": "0.1.0",
         "uptime_seconds": uptime,
-        "cors_origins": _CORS_ORIGINS,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -216,18 +251,22 @@ async def optimize(payload: OptimizeRequest):
     if _solver is None:
         raise HTTPException(status_code=503, detail="Solver not initialized.")
 
-    try:
-        loop = asyncio.get_event_loop()
-        result: OptimizationResult = await loop.run_in_executor(
-            None, partial(_solver.find_optimized_routing, payload)
-        )
-        return result
-    except ValueError as exc:
-        logger.warning("Validation error: %s", exc)
-        raise HTTPException(status_code=400, detail=str(exc))
-    except Exception as exc:
-        logger.exception("Optimize error: %s", exc)
-        raise HTTPException(status_code=500, detail="Internal optimization error.")
+    if _optimize_semaphore.locked() and _optimize_semaphore._value == 0:
+        raise HTTPException(status_code=503, detail="Server busy. Please retry in a moment.")
+
+    async with _optimize_semaphore:
+        try:
+            loop = asyncio.get_event_loop()
+            result: OptimizationResult = await loop.run_in_executor(
+                None, partial(_solver.find_optimized_routing, payload)
+            )
+            return result
+        except ValueError as exc:
+            logger.warning("Validation error: %s", exc)
+            raise HTTPException(status_code=400, detail=str(exc))
+        except Exception as exc:
+            logger.exception("Optimize error: %s", exc)
+            raise HTTPException(status_code=500, detail="Internal optimization error.")
 
 
 # ---------------------------------------------------------------------------
@@ -286,14 +325,15 @@ async def quick_optimize(
         latency_risk_acknowledged=latency_risk_ack,
         stateless=stateless,
     )
-    try:
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None, partial(_solver.find_optimized_routing, req)
-        )
-    except Exception as exc:
-        logger.exception("quick-optimize error: %s", exc)
-        raise HTTPException(status_code=500, detail="Internal optimization error.")
+    async with _optimize_semaphore:
+        try:
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(
+                None, partial(_solver.find_optimized_routing, req)
+            )
+        except Exception as exc:
+            logger.exception("quick-optimize error: %s", exc)
+            raise HTTPException(status_code=500, detail="Internal optimization error.")
 
 
 # ---------------------------------------------------------------------------
@@ -304,6 +344,16 @@ class WorkloadCheckRequest(BaseModel):
     inbound_ports: list[int] = []
     docker_command: str = ""
     target_regions: list[str] = []
+
+    model_config = {"str_max_length": 512}
+
+    def model_post_init(self, __context):
+        if len(self.target_regions) > 60:
+            raise ValueError("target_regions must have at most 60 items.")
+        if len(self.inbound_ports) > 20:
+            raise ValueError("inbound_ports must have at most 20 items.")
+        if len(self.docker_command) > 512:
+            raise ValueError("docker_command too long (max 512 chars).")
 
 
 class WorkloadCheckResponse(BaseModel):

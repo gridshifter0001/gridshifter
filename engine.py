@@ -577,6 +577,9 @@ class Solver:
         gpu_count    = req.gpu_spec.count
         duration     = req.job_duration_hours
 
+        if not inventories:
+            raise ValueError("No cloud inventory data available. All scrapers failed. Please retry later.")
+
         # 현재 리전의 CSP 결정 (Cross-CSP 가드레일 기준점)
         current_provider: str = next(
             (inv.provider for inv in inventories if inv.region == req.current_region),

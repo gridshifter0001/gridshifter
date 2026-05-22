@@ -1,0 +1,883 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GridShifter AI — 글로벌 GPU 최적 라우팅 대시보드</title>
+  <style>
+    :root {
+      --bg: #0b0f1a;
+      --surface: #131929;
+      --surface2: #1a2236;
+      --border: #1e2d45;
+      --accent: #3b82f6;
+      --accent2: #06b6d4;
+      --green: #22c55e;
+      --yellow: #f59e0b;
+      --red: #ef4444;
+      --text: #e2e8f0;
+      --muted: #64748b;
+      --radius: 12px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      min-height: 100vh;
+    }
+
+    /* ── Header ── */
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 18px 32px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+    }
+    .logo { display: flex; align-items: center; gap: 10px; }
+    .logo-icon {
+      width: 36px; height: 36px; border-radius: 8px;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px;
+    }
+    .logo h1 { font-size: 1.25rem; font-weight: 700; letter-spacing: -0.3px; }
+    .logo span { font-size: 0.75rem; color: var(--muted); }
+    #status-badge {
+      display: flex; align-items: center; gap: 6px;
+      padding: 6px 14px; border-radius: 99px;
+      font-size: 0.8rem; font-weight: 600;
+      border: 1px solid var(--border);
+      background: var(--surface2);
+      transition: all .3s;
+    }
+    #status-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--muted); transition: background .3s;
+    }
+    #status-dot.online { background: var(--green); box-shadow: 0 0 6px var(--green); }
+    #status-dot.offline { background: var(--red); }
+    .header-right { display: flex; align-items: center; gap: 12px; }
+    .btn-pricing {
+      padding: 7px 16px; border-radius: 8px; font-size: .8rem; font-weight: 700;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      color: #fff; border: none; cursor: pointer; letter-spacing: .3px;
+      white-space: nowrap;
+    }
+    .btn-pricing:hover { opacity: .88; }
+
+    /* ── Beta Banner ── */
+    .beta-banner {
+      background: linear-gradient(90deg, rgba(59,130,246,.15), rgba(6,182,212,.15));
+      border: 1px solid rgba(59,130,246,.35);
+      border-radius: var(--radius);
+      padding: 12px 20px;
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      margin-bottom: 20px; flex-wrap: wrap;
+    }
+    .beta-banner span { font-size: .85rem; color: var(--text); }
+    .beta-banner strong { color: var(--accent2); }
+    .beta-banner .btn-sm {
+      padding: 6px 14px; border-radius: 6px; font-size: .78rem; font-weight: 700;
+      background: var(--accent); color: #fff; border: none; cursor: pointer;
+      white-space: nowrap;
+    }
+
+    /* ── Pricing Modal ── */
+    .modal-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,.75);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 1000; padding: 24px;
+    }
+    .modal-overlay.hidden { display: none; }
+    .modal-box {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 16px; padding: 36px 32px; max-width: 720px; width: 100%;
+      position: relative;
+    }
+    .modal-close {
+      position: absolute; top: 16px; right: 20px;
+      background: none; border: none; color: var(--muted); font-size: 1.4rem;
+      cursor: pointer; line-height: 1;
+    }
+    .modal-close:hover { color: var(--text); }
+    .pricing-header { text-align: center; margin-bottom: 28px; }
+    .pricing-header h2 { font-size: 1.5rem; font-weight: 800; margin-bottom: 8px; }
+    .pricing-header p { color: var(--muted); font-size: .9rem; }
+    .beta-pill {
+      display: inline-block; padding: 4px 12px; border-radius: 99px;
+      background: rgba(6,182,212,.15); color: var(--accent2);
+      border: 1px solid rgba(6,182,212,.4); font-size: .75rem; font-weight: 700;
+      margin-bottom: 10px; letter-spacing: .5px;
+    }
+    .plans-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    @media (max-width: 560px) { .plans-grid { grid-template-columns: 1fr; } }
+    .plan-card {
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 12px; padding: 24px 20px;
+    }
+    .plan-card.featured {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 1px var(--accent), 0 8px 32px rgba(59,130,246,.2);
+    }
+    .plan-card .plan-name { font-size: 1rem; font-weight: 800; margin-bottom: 4px; }
+    .plan-card .plan-price {
+      font-size: 2rem; font-weight: 900; margin: 10px 0 4px;
+      background: linear-gradient(135deg,#fff,#94a3b8); -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+    }
+    .plan-card.featured .plan-price {
+      background: linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+    }
+    .plan-card .plan-period { font-size: .78rem; color: var(--muted); margin-bottom: 16px; }
+    .plan-card ul { list-style: none; display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; }
+    .plan-card ul li { font-size: .84rem; color: var(--text); display: flex; gap: 8px; align-items: flex-start; }
+    .plan-card ul li::before { content: '✓'; color: var(--green); font-weight: 700; flex-shrink: 0; }
+    .plan-btn {
+      width: 100%; padding: 11px; border-radius: 8px; font-size: .88rem; font-weight: 700;
+      cursor: pointer; border: none; transition: opacity .2s;
+    }
+    .plan-btn:hover { opacity: .85; }
+    .plan-btn-free { background: var(--surface); color: var(--text); border: 1px solid var(--border) !important; }
+    .plan-btn-pro { background: linear-gradient(135deg,var(--accent),var(--accent2)); color: #fff; }
+    .plan-btn-pro:disabled { opacity: .5; cursor: default; }
+    .register-section { margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--border); }
+    .register-section h3 { font-size: 1rem; font-weight: 700; margin-bottom: 12px; }
+    .register-row { display: flex; gap: 8px; }
+    .register-row input {
+      flex: 1; background: var(--surface2); border: 1px solid var(--border);
+      color: var(--text); padding: 10px 14px; border-radius: 8px; font-size: .88rem; outline: none;
+    }
+    .register-row input:focus { border-color: var(--accent); }
+    .register-row button {
+      padding: 10px 20px; border-radius: 8px; background: var(--accent);
+      color: #fff; border: none; font-size: .88rem; font-weight: 700; cursor: pointer; white-space: nowrap;
+    }
+    .register-row button:hover { opacity: .88; }
+    #register-result { margin-top: 10px; font-size: .82rem; }
+    #register-result.ok { color: var(--green); }
+    #register-result.err { color: var(--red); }
+
+    /* ── Layout ── */
+    main { max-width: 1200px; margin: 0 auto; padding: 32px 24px; }
+
+    /* ── Controls ── */
+    .controls {
+      display: flex;
+      align-items: flex-end;
+      flex-wrap: wrap;
+      gap: 12px 16px;
+      margin-bottom: 28px;
+      padding: 20px 24px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+    }
+    .field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+    .field-sm  { width: 100px; }
+    .field-md  { width: 140px; }
+    .field-lg  { flex: 1 1 200px; min-width: 160px; }
+    .field-compliance { width: 120px; }
+    .field-workload   { flex: 0 0 auto; }
+    .field-run        { flex: 0 0 auto; margin-left: auto; align-self: flex-end; }
+    .ctrl-label {
+      font-size: 0.72rem; color: var(--muted); font-weight: 600;
+      letter-spacing: .5px; text-transform: uppercase;
+      white-space: nowrap; margin-bottom: 2px;
+    }
+    label { font-size: 0.78rem; color: var(--muted); font-weight: 600; letter-spacing: .4px; text-transform: uppercase; }
+    input[type=number], input[type=text], select {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 9px 12px;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      outline: none;
+      transition: border-color .2s;
+      width: 100%;
+    }
+    input[type=number]:focus, input[type=text]:focus, select:focus { border-color: var(--accent); }
+
+    /* ── Toggle ── */
+    .toggle-wrap { display: flex; align-items: center; gap: 10px; height: 38px; }
+    .toggle { position: relative; width: 42px; height: 24px; cursor: pointer; flex-shrink: 0; }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .slider {
+      position: absolute; inset: 0; background: var(--border);
+      border-radius: 99px; transition: .3s;
+    }
+    .slider:before {
+      content: ''; position: absolute;
+      width: 18px; height: 18px; left: 3px; bottom: 3px;
+      background: white; border-radius: 50%; transition: .3s;
+    }
+    .toggle input:checked + .slider { background: var(--accent); }
+    .toggle input:checked + .slider:before { transform: translateX(18px); }
+    #compliance-label { font-size: .82rem; color: var(--muted); white-space: nowrap; }
+
+    /* ── Workload Pills ── */
+    .workload-pills { display: flex; gap: 6px; height: 38px; align-items: center; }
+    .pill {
+      padding: 6px 14px; border-radius: 99px; border: 1px solid var(--border);
+      background: var(--surface2); color: var(--muted);
+      font-size: 0.78rem; font-weight: 600; cursor: pointer; transition: all .2s;
+      white-space: nowrap; line-height: 1;
+    }
+    .pill:hover { border-color: var(--accent); color: var(--text); }
+    .pill.active-batch  { background: rgba(34,197,94,.15);  color: var(--green);  border-color: rgba(34,197,94,.4); }
+    .pill.active-live   { background: rgba(239,68,68,.15);  color: #fca5a5;        border-color: rgba(239,68,68,.4); }
+    .pill.active-auto   { background: rgba(59,130,246,.15); color: var(--accent); border-color: rgba(59,130,246,.4); }
+
+    /* ── Modal Overlay ── */
+    #modal-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,.7); backdrop-filter: blur(4px);
+      z-index: 100; align-items: center; justify-content: center;
+    }
+    #modal-overlay.show { display: flex; }
+    #modal-box {
+      background: var(--surface); border: 1px solid rgba(239,68,68,.4);
+      border-radius: 16px; padding: 32px; max-width: 560px; width: 90%;
+      box-shadow: 0 0 40px rgba(239,68,68,.2);
+    }
+    .modal-icon { font-size: 2.5rem; margin-bottom: 12px; }
+    .modal-title { font-size: 1.1rem; font-weight: 800; color: #fca5a5; margin-bottom: 8px; }
+    .modal-msg { font-size: 0.875rem; color: var(--muted); line-height: 1.7; margin-bottom: 24px; }
+    .modal-choices { display: flex; flex-direction: column; gap: 10px; }
+    .choice-btn {
+      text-align: left; padding: 14px 18px; border-radius: 10px;
+      border: 1px solid var(--border); background: var(--surface2);
+      color: var(--text); cursor: pointer; transition: border-color .2s;
+    }
+    .choice-btn:hover { border-color: var(--accent); }
+    .choice-btn.recommended { border-color: var(--green); background: rgba(34,197,94,.07); }
+    .choice-label { font-size: 0.875rem; font-weight: 700; margin-bottom: 4px; }
+    .choice-desc  { font-size: 0.78rem; color: var(--muted); line-height: 1.5; }
+
+    #run-btn {
+      padding: 9px 24px;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: opacity .2s, transform .1s;
+      white-space: nowrap;
+      height: 38px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    #run-btn:hover { opacity: .9; }
+    #run-btn:active { transform: scale(.97); }
+    #run-btn:disabled { opacity: .5; cursor: not-allowed; }
+
+    /* ── Summary Cards ── */
+    .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 28px; }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+    }
+    .card-label { font-size: 0.72rem; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .4px; margin-bottom: 6px; white-space: nowrap; }
+    .card-value { font-size: 1.45rem; font-weight: 800; letter-spacing: -0.5px; word-break: break-all; }
+    .card-sub { font-size: 0.75rem; color: var(--muted); margin-top: 4px; }
+    .highlight { border-color: var(--accent); background: linear-gradient(135deg, #1a2236, #0f1e35); }
+    .green-text { color: var(--green); }
+    .yellow-text { color: var(--yellow); }
+    .red-text { color: var(--red); }
+    .blue-text { color: var(--accent2); }
+
+    /* ── Table ── */
+    .table-wrap {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .table-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+    }
+    .table-header h2 { font-size: 0.95rem; font-weight: 700; }
+    .badge {
+      font-size: 0.72rem; font-weight: 700; padding: 3px 10px;
+      border-radius: 99px; letter-spacing: .3px;
+    }
+    .badge-blue { background: rgba(59,130,246,.15); color: var(--accent); border: 1px solid rgba(59,130,246,.3); }
+    .badge-green { background: rgba(34,197,94,.15); color: var(--green); border: 1px solid rgba(34,197,94,.3); }
+    .badge-yellow { background: rgba(245,158,11,.15); color: var(--yellow); border: 1px solid rgba(245,158,11,.3); }
+
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; table-layout: auto; }
+    thead th {
+      text-align: left; padding: 10px 14px;
+      font-size: 0.7rem; font-weight: 600; color: var(--muted);
+      text-transform: uppercase; letter-spacing: .4px;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap; background: var(--surface);
+      position: sticky; top: 0;
+    }
+    tbody tr { border-bottom: 1px solid var(--border); transition: background .15s; }
+    tbody tr:last-child { border-bottom: none; }
+    tbody tr:hover { background: var(--surface2); }
+    tbody tr.recommended { background: rgba(59,130,246,.07); }
+    tbody td {
+      padding: 10px 14px; font-size: 0.83rem; vertical-align: middle;
+      white-space: nowrap;
+    }
+    tbody td.td-region { font-family: 'Consolas', monospace; font-size: 0.78rem; }
+    .sss-bar-wrap { display: flex; align-items: center; gap: 8px; min-width: 100px; }
+    .sss-bar {
+      flex: 1; height: 5px; border-radius: 99px; background: var(--border);
+      overflow: hidden; min-width: 50px;
+    }
+    .sss-bar-fill { height: 100%; border-radius: 99px; transition: width .5s ease; }
+
+    /* ── Empty / Loading ── */
+    #empty {
+      text-align: center; padding: 64px 24px; color: var(--muted);
+    }
+    #empty .empty-icon { font-size: 3rem; margin-bottom: 16px; }
+    #empty p { font-size: 0.9rem; line-height: 1.7; }
+    .spinner {
+      display: inline-block; width: 20px; height: 20px;
+      border: 3px solid rgba(255,255,255,.2);
+      border-top-color: white;
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+      vertical-align: middle; margin-right: 6px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Error banner ── */
+    #error-banner {
+      display: none;
+      background: rgba(239,68,68,.1);
+      border: 1px solid rgba(239,68,68,.3);
+      color: #fca5a5;
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-bottom: 20px;
+      font-size: 0.875rem;
+    }
+    footer {
+      text-align: center; color: var(--muted); font-size: 0.78rem;
+      padding: 24px; border-top: 1px solid var(--border); margin-top: 40px;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-icon">⚡</div>
+    <div>
+      <h1>GridShifter AI</h1>
+      <span>글로벌 GPU 최적 라우팅 대시보드</span>
+    </div>
+  </div>
+  <div class="header-right">
+    <div id="status-badge">
+      <div id="status-dot"></div>
+      <span id="status-text">연결 확인 중…</span>
+    </div>
+    <button class="btn-pricing" onclick="openPricing()">플랜 &amp; 요금제</button>
+  </div>
+</header>
+
+<!-- Pricing Modal -->
+<div class="modal-overlay hidden" id="pricing-modal" onclick="closePricingOutside(event)">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closePricing()">✕</button>
+    <div class="pricing-header">
+      <div class="beta-pill" id="beta-pill">BETA — 무료 오픈</div>
+      <h2>GridShifter AI 플랜</h2>
+      <p id="pricing-subtitle">베타 기간 동안 Pro 기능이 모두 무료로 제공됩니다.</p>
+    </div>
+    <div class="plans-grid" id="plans-grid">
+      <!-- JS로 렌더링 -->
+    </div>
+    <div class="register-section">
+      <h3>API 키 발급 (CLI 사용 + 플랜 추적용)</h3>
+      <div class="register-row">
+        <input type="email" id="register-email" placeholder="이메일 입력" />
+        <button onclick="registerKey()">키 발급</button>
+      </div>
+      <div id="register-result"></div>
+    </div>
+  </div>
+</div>
+
+<main>
+
+  <!-- Beta Banner -->
+  <div class="beta-banner" id="beta-banner">
+    <span>🚀 <strong>베타 오픈 기간</strong> — Pro 포함 모든 기능이 <strong>무료</strong>로 제공됩니다. 정식 오픈 전 API 키를 발급받아 두세요.</span>
+    <button class="btn-sm" onclick="openPricing()">API 키 발급 →</button>
+  </div>
+
+  <!-- Controls -->
+  <div class="controls">
+    <div class="field field-sm">
+      <span class="ctrl-label">GPU 수량</span>
+      <input type="number" id="gpu-count" value="4" min="1" max="512" />
+    </div>
+    <div class="field field-md">
+      <span class="ctrl-label">작업 시간 (h)</span>
+      <input type="number" id="job-hours" value="8" min="0.5" max="8760" step="0.5" />
+    </div>
+    <div class="field field-lg">
+      <span class="ctrl-label">베이스라인 리전</span>
+      <select id="region">
+        <option value="ap-northeast-2">서울 (ap-northeast-2)</option>
+        <option value="us-east-1">버지니아 (us-east-1)</option>
+        <option value="us-west-2">오레곤 (us-west-2)</option>
+        <option value="eu-west-1">아일랜드 (eu-west-1)</option>
+      </select>
+    </div>
+    <div class="field field-compliance">
+      <span class="ctrl-label">컴플라이언스</span>
+      <div class="toggle-wrap">
+        <label class="toggle">
+          <input type="checkbox" id="compliance" />
+          <span class="slider"></span>
+        </label>
+        <span id="compliance-label">OFF</span>
+      </div>
+    </div>
+    <div class="field field-workload">
+      <span class="ctrl-label">워크로드 타입</span>
+      <div class="workload-pills">
+        <button class="pill active-batch" id="pill-batch" onclick="setWorkload('batch')">🗂 배치</button>
+        <button class="pill"             id="pill-live"  onclick="setWorkload('live')">🌐 라이브</button>
+        <button class="pill"             id="pill-auto"  onclick="setWorkload('auto')">🤖 자동</button>
+      </div>
+    </div>
+    <div class="field field-md" id="ports-field" style="display:none">
+      <span class="ctrl-label">인바운드 포트</span>
+      <input type="text" id="inbound-ports" placeholder="80, 443, 8080" />
+    </div>
+    <div class="field-run">
+      <button id="run-btn" onclick="runOptimize()">⚡ 최적화 실행</button>
+    </div>
+  </div>
+
+  <!-- Pre-Billing Alert Modal -->
+  <div id="modal-overlay">
+    <div id="modal-box">
+      <div class="modal-icon">⚠️</div>
+      <div class="modal-title" id="modal-title">실시간 서비스 지연 리스크 경고</div>
+      <div class="modal-msg" id="modal-msg"></div>
+      <div class="modal-choices" id="modal-choices"></div>
+    </div>
+  </div>
+
+  <!-- Error banner -->
+  <div id="error-banner"></div>
+
+  <!-- Summary cards -->
+  <div class="summary" id="summary" style="display:none">
+    <div class="card highlight">
+      <div class="card-label">추천 리전</div>
+      <div class="card-value blue-text" id="s-region">—</div>
+      <div class="card-sub" id="s-provider">—</div>
+    </div>
+    <div class="card">
+      <div class="card-label">예상 절감액</div>
+      <div class="card-value green-text" id="s-savings">—</div>
+      <div class="card-sub" id="s-baseline">베이스라인 대비</div>
+    </div>
+    <div class="card">
+      <div class="card-label">예상 총 비용</div>
+      <div class="card-value" id="s-cost">—</div>
+      <div class="card-sub" id="s-cost-sub">—</div>
+    </div>
+    <div class="card">
+      <div class="card-label">SSS 점수</div>
+      <div class="card-value yellow-text" id="s-sss">—</div>
+      <div class="card-sub">안정성-절약 통합 지수</div>
+    </div>
+    <div class="card">
+      <div class="card-label">전력 단가</div>
+      <div class="card-value" id="s-power">—</div>
+      <div class="card-sub" id="s-power-src">—</div>
+    </div>
+  </div>
+
+  <!-- Table -->
+  <div class="table-wrap">
+    <div class="table-header">
+      <h2>전체 후보 리전 비교</h2>
+      <span class="badge badge-blue" id="candidate-count"></span>
+    </div>
+    <div id="empty">
+      <div class="empty-icon">🌐</div>
+      <p>GPU 수량과 작업 시간을 설정하고<br><strong>최적화 실행</strong>을 눌러 주세요.</p>
+    </div>
+    <table id="result-table" style="display:none">
+      <thead>
+        <tr>
+          <th>리전</th>
+          <th>공급사</th>
+          <th>전력단가</th>
+          <th>스팟/hr</th>
+          <th>총 비용</th>
+          <th>절감률</th>
+          <th>지연</th>
+          <th>재고 리스크</th>
+          <th>회수 확률</th>
+          <th>SSS 점수</th>
+          <th>상태</th>
+        </tr>
+      </thead>
+      <tbody id="result-body"></tbody>
+    </table>
+  </div>
+
+</main>
+
+<footer>GridShifter AI MVP · API: <span id="api-base">http://localhost:8000</span> · <span id="last-updated">—</span></footer>
+
+<script>
+const API = 'http://localhost:8000';
+let _currentWorkload  = 'batch';
+let _latencyRiskAck   = false;
+let _forceStateless   = false;
+
+// ── 상태 확인 ──────────────────────────────────────────
+async function checkHealth() {
+  try {
+    const r = await fetch(`${API}/api/v1/health`);
+    const d = await r.json();
+    const dot = document.getElementById('status-dot');
+    const txt = document.getElementById('status-text');
+    if (d.status === 'ok') {
+      dot.className = 'online';
+      txt.textContent = `API 연결됨 · 업타임 ${fmtUptime(d.uptime_seconds)}`;
+    } else { dot.className = 'offline'; txt.textContent = '응답 오류'; }
+  } catch {
+    document.getElementById('status-dot').className = 'offline';
+    document.getElementById('status-text').textContent = 'API 연결 실패';
+  }
+}
+checkHealth();
+setInterval(checkHealth, 15000);
+function fmtUptime(s) {
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s/60)}m`;
+  return `${Math.floor(s/3600)}h ${Math.floor((s%3600)/60)}m`;
+}
+
+// ── 워크로드 타입 선택 ─────────────────────────────────
+function setWorkload(type) {
+  _currentWorkload = type;
+  _latencyRiskAck  = false;
+  ['batch','live','auto'].forEach(t => {
+    const p = document.getElementById(`pill-${t}`);
+    p.className = `pill${type === t ? ` active-${t}` : ''}`;
+  });
+  // 라이브/자동이면 포트 입력 노출
+  document.getElementById('ports-field').style.display =
+    (type === 'live' || type === 'auto') ? 'flex' : 'none';
+}
+
+// ── 컴플라이언스 토글 ──────────────────────────────────
+document.getElementById('compliance').addEventListener('change', e => {
+  document.getElementById('compliance-label').textContent = e.target.checked ? 'ON' : 'OFF';
+});
+
+// ── Pre-Billing Alert 모달 ─────────────────────────────
+function showAlert(alert) {
+  document.getElementById('modal-msg').textContent = alert.message;
+  const choices = document.getElementById('modal-choices');
+  choices.innerHTML = '';
+  alert.user_choices.forEach(ch => {
+    const btn = document.createElement('button');
+    btn.className = 'choice-btn' + (ch.id === 'lock_local' ? ' recommended' : '');
+    btn.innerHTML = `<div class="choice-label">${ch.label}</div><div class="choice-desc">${ch.description}</div>`;
+    btn.onclick = () => handleAlertChoice(ch.id);
+    choices.appendChild(btn);
+  });
+  document.getElementById('modal-overlay').classList.add('show');
+}
+
+function handleAlertChoice(choiceId) {
+  document.getElementById('modal-overlay').classList.remove('show');
+  if (choiceId === 'lock_local') {
+    // LIVE 모드 유지 + 저지연 필터 활성 (ack=false → 엔진이 저지연 리전만 추천)
+    setWorkload('live');
+    _latencyRiskAck = false;
+    runOptimize();
+  } else if (choiceId === 'enable_stateless') {
+    // stateless 플래그를 URL 파라미터로 전달해 Cross-CSP 허용
+    _forceStateless = true;
+    runOptimize();
+  } else if (choiceId === 'accept_risk') {
+    _latencyRiskAck = true;
+    runOptimize();
+  } else if (choiceId === 'switch_batch') {
+    setWorkload('batch');
+    runOptimize();
+  }
+}
+
+// ── 최적화 실행 ────────────────────────────────────────
+async function runOptimize() {
+  const btn = document.getElementById('run-btn');
+  document.getElementById('error-banner').style.display = 'none';
+
+  const gpuCount   = parseInt(document.getElementById('gpu-count').value);
+  const jobHours   = parseFloat(document.getElementById('job-hours').value);
+  const region     = document.getElementById('region').value;
+  const compliance = document.getElementById('compliance').checked;
+  const portsRaw   = document.getElementById('inbound-ports').value.trim();
+
+  if (!gpuCount || gpuCount < 1 || gpuCount > 512) return showError('GPU 수량은 1–512 사이여야 합니다.');
+  if (!jobHours || jobHours < 0.5 || jobHours > 8760) return showError('작업 시간은 0.5–8760 사이여야 합니다.');
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>분석 중…';
+
+  try {
+    const url = new URL(`${API}/api/v1/quick-optimize`);
+    url.searchParams.set('gpu_count', gpuCount);
+    url.searchParams.set('job_hours', jobHours);
+    url.searchParams.set('require_compliance', compliance);
+    url.searchParams.set('region', region);
+    url.searchParams.set('workload', _currentWorkload);
+    url.searchParams.set('latency_risk_ack', _latencyRiskAck);
+    if (_forceStateless) url.searchParams.set('stateless', 'true');
+    if (portsRaw) url.searchParams.set('inbound_ports', portsRaw);
+    _forceStateless = false; // 1회 사용 후 리셋
+
+    const res = await fetch(url.toString());
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || err.error || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+
+    // Pre-Billing Alert 처리
+    if (data.workload_alert && data.workload_alert.triggered) {
+      showAlert(data.workload_alert);
+      return;
+    }
+
+    // resolved_workload 가 live로 업데이트되면 UI 동기화
+    if (data.resolved_workload && data.resolved_workload !== _currentWorkload) {
+      setWorkload(data.resolved_workload);
+    }
+
+    renderResult(data);
+  } catch (e) {
+    showError(`요청 실패: ${e.message}`);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '⚡ 최적화 실행';
+  }
+}
+
+function showError(msg) {
+  const el = document.getElementById('error-banner');
+  el.textContent = '⚠ ' + msg;
+  el.style.display = 'block';
+}
+
+// ── 결과 렌더링 ────────────────────────────────────────
+function renderResult(data) {
+  const rec = data.recommended;
+  const candidates = data.all_candidates;
+
+  if (rec) {
+    const saved = data.baseline_cost_usd - rec.estimated_total_cost_usd;
+    setText('s-region',   rec.region);
+    setText('s-provider', rec.provider + (rec.latency_ms ? ` · ${rec.latency_ms}ms` : ''));
+    setText('s-savings',  `$${saved.toFixed(2)} (${rec.savings_pct}%)`);
+    setText('s-baseline', `베이스라인 $${data.baseline_cost_usd.toFixed(2)} 대비`);
+    setText('s-cost',     `$${rec.estimated_total_cost_usd.toFixed(2)}`);
+    setText('s-cost-sub', `스팟 $${rec.spot_price_usd_per_hour}/hr × GPU × 시간`);
+    setText('s-sss',      rec.sss_score.toFixed(4));
+    setText('s-power',    `$${rec.power_price_usd_per_kwh.toFixed(4)}/kWh`);
+    setText('s-power-src','전력 단가');
+    document.getElementById('summary').style.display = 'grid';
+  }
+
+  const maxSss = Math.max(...candidates.map(c => c.sss_score));
+  const minSss = Math.min(...candidates.map(c => c.sss_score));
+  const range  = maxSss - minSss || 1;
+  const tbody  = document.getElementById('result-body');
+  tbody.innerHTML = '';
+
+  candidates.forEach(c => {
+    const pct      = Math.max(0, (c.sss_score - minSss) / range * 100);
+    const excluded = c.compliance_violation || c.latency_excluded;
+    const barColor = c.is_recommended ? '#3b82f6' : excluded ? '#ef4444' : '#64748b';
+    const riskPct  = (c.inventory_shortage_risk * 100).toFixed(0);
+    const revocPct = (c.spot_revocation_probability * 100).toFixed(1);
+    const latMs    = c.latency_ms || 0;
+    const latColor = latMs < 30 ? 'var(--green)' : latMs < 80 ? 'var(--accent2)' : latMs < 150 ? 'var(--yellow)' : 'var(--red)';
+
+    const statusBadge = c.is_recommended
+      ? '<span class="badge badge-green">✓ 추천</span>'
+      : c.latency_excluded
+        ? '<span class="badge" style="background:rgba(239,68,68,.1);color:#fca5a5;border:1px solid rgba(239,68,68,.3)">⚡지연배제</span>'
+        : c.compliance_violation
+          ? '<span class="badge" style="background:rgba(239,68,68,.1);color:#fca5a5;border:1px solid rgba(239,68,68,.3)">규제위반</span>'
+          : '<span class="badge" style="background:var(--surface2);color:var(--muted);border:1px solid var(--border)">후보</span>';
+
+    const tr = document.createElement('tr');
+    if (c.is_recommended) tr.className = 'recommended';
+
+    tr.innerHTML = `
+      <td class="td-region"><strong>${c.region}</strong></td>
+      <td>${c.provider}</td>
+      <td style="color:var(--accent2)">$${c.power_price_usd_per_kwh.toFixed(4)}</td>
+      <td>$${c.spot_price_usd_per_hour.toFixed(3)}/hr</td>
+      <td><strong>$${c.estimated_total_cost_usd.toFixed(2)}</strong></td>
+      <td class="${c.savings_pct > 0 ? 'green-text' : c.savings_pct < 0 ? 'red-text' : ''}">${c.savings_pct > 0 ? '+' : ''}${c.savings_pct}%</td>
+      <td style="color:${latColor};font-weight:600">${latMs.toFixed(0)}ms</td>
+      <td class="${riskPct > 50 ? 'red-text' : riskPct > 20 ? 'yellow-text' : 'green-text'}">${riskPct}%</td>
+      <td class="${parseFloat(revocPct) > 20 ? 'red-text' : parseFloat(revocPct) > 10 ? 'yellow-text' : 'green-text'}">${revocPct}%</td>
+      <td>
+        <div class="sss-bar-wrap">
+          <span style="font-size:.8rem;min-width:50px">${c.sss_score.toFixed(3)}</span>
+          <div class="sss-bar"><div class="sss-bar-fill" style="width:${pct}%;background:${barColor}"></div></div>
+        </div>
+      </td>
+      <td>${statusBadge}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  // 워크로드 뱃지 표시
+  const wlLabel = data.resolved_workload === 'live' ? '🌐 라이브 서비스 모드' : '🗂 배치 모드';
+  document.getElementById('candidate-count').textContent = `${candidates.length}개 리전 · ${wlLabel}`;
+  document.getElementById('result-table').style.display = 'table';
+  document.getElementById('empty').style.display = 'none';
+  document.getElementById('last-updated').textContent =
+    `마지막 갱신: ${new Date(data.timestamp).toLocaleTimeString('ko-KR')}`;
+}
+
+function setText(id, val) { document.getElementById(id).textContent = val; }
+
+// ── Pricing Modal ──────────────────────────────────────────
+async function openPricing() {
+  document.getElementById('pricing-modal').classList.remove('hidden');
+  await loadPlans();
+}
+function closePricing() {
+  document.getElementById('pricing-modal').classList.add('hidden');
+}
+function closePricingOutside(e) {
+  if (e.target === document.getElementById('pricing-modal')) closePricing();
+}
+
+async function loadPlans() {
+  try {
+    const r = await fetch(`${API}/api/v1/billing/plans`);
+    const d = await r.json();
+    const betaOn = !d.billing_enabled;
+
+    document.getElementById('beta-pill').style.display = betaOn ? '' : 'none';
+    document.getElementById('pricing-subtitle').textContent = betaOn
+      ? '베타 기간 동안 Pro 기능이 모두 무료로 제공됩니다.'
+      : '필요한 플랜을 선택해 주세요.';
+
+    const grid = document.getElementById('plans-grid');
+    grid.innerHTML = '';
+    const plans = d.plans || {};
+
+    Object.entries(plans).forEach(([key, p]) => {
+      const featured = key === 'pro';
+      const card = document.createElement('div');
+      card.className = `plan-card${featured ? ' featured' : ''}`;
+
+      const proBtnLabel = betaOn
+        ? '베타 기간 무료 이용 중'
+        : key === 'free' ? '현재 플랜' : 'Pro로 업그레이드';
+      const proBtnClass = key === 'free' ? 'plan-btn plan-btn-free' : 'plan-btn plan-btn-pro';
+      const proBtnDisabled = betaOn || key === 'free' ? 'disabled' : '';
+
+      const featureList = (p.features || []).map(f => `<li>${f}</li>`).join('');
+      const deployLimit = p.deployments_per_month === -1 ? '무제한' : `월 ${p.deployments_per_month}회`;
+
+      card.innerHTML = `
+        <div class="plan-name">${p.name || key}</div>
+        <div class="plan-price">$${p.price_usd || 0}${p.price_usd > 0 ? '' : ''}</div>
+        <div class="plan-period">${p.price_usd > 0 ? '/월' : '영구 무료'}</div>
+        <ul>${featureList}<li>실제 배포 ${deployLimit}</li></ul>
+        <button class="${proBtnClass}" ${proBtnDisabled} onclick="handlePlanClick('${key}')">${proBtnLabel}</button>
+      `;
+      grid.appendChild(card);
+    });
+  } catch (e) {
+    document.getElementById('plans-grid').innerHTML =
+      '<p style="color:var(--muted);font-size:.85rem">플랜 정보를 불러오지 못했습니다. 서버 연결을 확인해 주세요.</p>';
+  }
+}
+
+function handlePlanClick(planKey) {
+  if (planKey === 'pro') {
+    // 결제 활성화 시 checkout 엔드포인트 호출
+    const apiKey = localStorage.getItem('gs_api_key');
+    if (!apiKey) { alert('먼저 API 키를 발급받아 주세요.'); return; }
+    fetch(`${API}/api/v1/billing/checkout`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ api_key: apiKey }),
+    }).then(r => r.json()).then(d => {
+      if (d.checkout_url) window.open(d.checkout_url, '_blank');
+      else alert(d.message || '베타 기간 무료 오픈 중입니다.');
+    });
+  }
+}
+
+async function registerKey() {
+  const email = document.getElementById('register-email').value.trim();
+  const res   = document.getElementById('register-result');
+  res.className = ''; res.textContent = '발급 중…';
+  if (!email || !email.includes('@')) {
+    res.className = 'err'; res.textContent = '올바른 이메일을 입력해 주세요.'; return;
+  }
+  try {
+    const r = await fetch(`${API}/api/v1/billing/register`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ email }),
+    });
+    const d = await r.json();
+    if (r.ok && d.api_key) {
+      localStorage.setItem('gs_api_key', d.api_key);
+      res.className = 'ok';
+      res.innerHTML = `키 발급 완료! <code style="font-size:.8rem;background:var(--surface2);padding:2px 6px;border-radius:4px;user-select:all">${d.api_key}</code><br><span style="font-size:.75rem;color:var(--muted)">브라우저에 저장되었습니다. CLI 사용 시 --api-key 옵션에 입력하세요.</span>`;
+    } else {
+      res.className = 'err'; res.textContent = d.detail || '발급 실패';
+    }
+  } catch (e) {
+    res.className = 'err'; res.textContent = '서버 연결 실패';
+  }
+}
+
+// 저장된 키 있으면 이메일 입력란 힌트 표시
+(function() {
+  const key = localStorage.getItem('gs_api_key');
+  if (key) {
+    const banner = document.getElementById('beta-banner');
+    if (banner) {
+      const hint = document.createElement('span');
+      hint.style.cssText = 'font-size:.75rem;color:var(--muted);margin-top:4px;display:block;width:100%';
+      hint.textContent = `발급된 API 키: ${key.slice(0,18)}…`;
+      banner.appendChild(hint);
+    }
+  }
+})();
+</script>
+</body>
+</html>

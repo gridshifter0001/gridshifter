@@ -1,0 +1,25 @@
+# ── API 키 / 시크릿 ──────────────────────────────────
+.env
+.env.*
+*.env
+*.env.txt
+keys.*
+secrets.*
+
+# ── Python ───────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+
+# ── OS / 에디터 ───────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp

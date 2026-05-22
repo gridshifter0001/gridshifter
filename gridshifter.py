@@ -279,10 +279,17 @@ def runpod_launch(
             "env":              [],
         }
     }
-    data = _runpod_gql(mutation, variables)
-    pod = data.get("podFindAndDeployOnDemand")
-    if not pod or not pod.get("id"):
-        raise RuntimeError("RunPod pod 생성 실패: 응답에 ID 없음")
+    raw = _runpod_gql(mutation, variables)
+    pod = raw.get("podFindAndDeployOnDemand")
+    if not pod:
+        # GraphQL errors 필드에 상세 원인이 있을 수 있음
+        raise RuntimeError(
+            f"RunPod pod 생성 실패: 응답 없음. "
+            f"원인: GPU 재고 부족(SUPPLY_CONSTRAINT) 또는 잔액 부족일 수 있습니다. "
+            f"RunPod 대시보드(runpod.io)에서 {gpu_type_id} 재고를 확인하세요."
+        )
+    if not pod.get("id"):
+        raise RuntimeError(f"RunPod pod 생성 실패: ID 없음. 응답: {pod}")
     return pod["id"]
 
 
@@ -507,14 +514,36 @@ def cmd_run(args: argparse.Namespace) -> None:
 
     try:
         if provider == "RunPod":
-            instance_id = runpod_launch(
-                image        = args.image,
-                gpu_type_id  = gpu_info["runpod_id"],
-                gpu_count    = args.count,
-                job_name     = job_name,
-                docker_cmd   = args.cmd or "",
-            )
-            ok(f"RunPod Pod 생성됨  ID={instance_id}")
+            try:
+                instance_id = runpod_launch(
+                    image        = args.image,
+                    gpu_type_id  = gpu_info["runpod_id"],
+                    gpu_count    = args.count,
+                    job_name     = job_name,
+                    docker_cmd   = args.cmd or "",
+                )
+                ok(f"RunPod Pod 생성됨  ID={instance_id}")
+            except RuntimeError as runpod_err:
+                warn(f"RunPod 실패: {runpod_err}")
+                # Lambda Labs로 자동 폴백 시도
+                if gpu_info.get("lambda_type") and LAMBDA_API_KEY:
+                    warn("Lambda Labs로 자동 폴백 시도합니다…")
+                    ssh_keys = lambda_get_ssh_keys()
+                    if ssh_keys:
+                        ssh_key = args.ssh_key or ssh_keys[0]
+                        lambda_region = rec.get("region", "us-tx-3").replace("lambda-", "")
+                        instance_id = lambda_launch(
+                            instance_type = gpu_info["lambda_type"],
+                            region_name   = lambda_region,
+                            ssh_key_name  = ssh_key,
+                            job_name      = job_name,
+                        )
+                        provider = "LambdaLabs"
+                        ok(f"Lambda Labs 폴백 성공  ID={instance_id}")
+                    else:
+                        raise RuntimeError("Lambda Labs SSH 키 없음. RunPod 재고도 없습니다.")
+                else:
+                    raise
 
         elif provider in ("LambdaLabs", "Lambda Labs"):
             # SSH 키 확인

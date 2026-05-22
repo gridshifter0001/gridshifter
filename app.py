@@ -287,6 +287,7 @@ async def optimize(payload: OptimizeRequest):
     tags=["Optimization"],
 )
 async def quick_optimize(
+    request: Request,
     gpu_count: int = Query(default=4, ge=1, le=512, description="H100 GPU 수량 (1–512)"),
     job_hours: float = Query(default=8.0, ge=0.5, le=8760.0, description="작업 시간 (시간 단위, 0.5–8760)"),
     require_compliance: bool = Query(default=False, description="데이터 컴플라이언스 강제 여부"),

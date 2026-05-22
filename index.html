@@ -464,6 +464,10 @@
       <span class="ctrl-label">인바운드 포트</span>
       <input type="text" id="inbound-ports" placeholder="80, 443, 8080" />
     </div>
+    <div class="field field-sm">
+      <span class="ctrl-label">데이터셋 (GB)</span>
+      <input type="number" id="dataset-gb" value="0" min="0" max="1000000" step="10" title="전송할 데이터셋 크기 (0 = HuggingFace 등 공개 데이터셋)" />
+    </div>
     <div class="field-run">
       <button id="run-btn" onclick="runOptimize()">⚡ 최적화 실행</button>
     </div>
@@ -640,6 +644,7 @@ async function runOptimize() {
   const region     = document.getElementById('region').value;
   const compliance = document.getElementById('compliance').checked;
   const portsRaw   = document.getElementById('inbound-ports').value.trim();
+  const datasetGb  = parseFloat(document.getElementById('dataset-gb').value) || 0;
 
   if (!gpuCount || gpuCount < 1 || gpuCount > 512) return showError('GPU 수량은 1–512 사이여야 합니다.');
   if (!jobHours || jobHours < 0.5 || jobHours > 8760) return showError('작업 시간은 0.5–8760 사이여야 합니다.');
@@ -657,6 +662,7 @@ async function runOptimize() {
     url.searchParams.set('latency_risk_ack', _latencyRiskAck);
     if (_forceStateless) url.searchParams.set('stateless', 'true');
     if (portsRaw) url.searchParams.set('inbound_ports', portsRaw);
+    if (datasetGb > 0) url.searchParams.set('dataset_gb', datasetGb);
     _forceStateless = false; // 1회 사용 후 리셋
 
     const res = await fetch(url.toString());
@@ -726,13 +732,17 @@ function renderResult(data) {
     const latMs    = c.latency_ms || 0;
     const latColor = latMs < 30 ? 'var(--green)' : latMs < 80 ? 'var(--accent2)' : latMs < 150 ? 'var(--yellow)' : 'var(--red)';
 
+    const egressWarn = c.egress_warning
+      ? `<br><span style="font-size:.72rem;color:var(--yellow)">⚠ 이그레스 $${c.egress_cost_usd?.toFixed(0)} 포함 시 절감 상쇄</span>`
+      : (c.egress_cost_usd > 0 ? `<br><span style="font-size:.72rem;color:var(--muted)">전송료 +$${c.egress_cost_usd?.toFixed(0)}</span>` : '');
+
     const statusBadge = c.is_recommended
-      ? '<span class="badge badge-green">✓ 추천</span>'
+      ? `<span class="badge badge-green">✓ 추천</span>${egressWarn}`
       : c.latency_excluded
         ? '<span class="badge" style="background:rgba(239,68,68,.1);color:#fca5a5;border:1px solid rgba(239,68,68,.3)">⚡지연배제</span>'
         : c.compliance_violation
           ? '<span class="badge" style="background:rgba(239,68,68,.1);color:#fca5a5;border:1px solid rgba(239,68,68,.3)">규제위반</span>'
-          : '<span class="badge" style="background:var(--surface2);color:var(--muted);border:1px solid var(--border)">후보</span>';
+          : `<span class="badge" style="background:var(--surface2);color:var(--muted);border:1px solid var(--border)">후보</span>${egressWarn}`;
 
     const tr = document.createElement('tr');
     if (c.is_recommended) tr.className = 'recommended';

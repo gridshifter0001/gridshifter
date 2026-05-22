@@ -244,6 +244,25 @@ class ComputeRequest(BaseModel):
         description="컴플라이언스 허용 리전 목록",
     )
 
+    # ── 데이터 이그레스 ───────────────────────────────────────────────────
+    dataset_size_gb: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1_000_000.0,
+        description=(
+            "현재 리전 외부로 전송해야 할 데이터셋 크기 (GB). "
+            "0이면 이그레스 비용 미계산 (HuggingFace 등 공개 데이터셋 사용 시). "
+            "값이 있으면 리전 간 이그레스 요금을 총비용에 포함해 SSS 재계산."
+        ),
+    )
+    data_source_region: str = Field(
+        default="",
+        description=(
+            "데이터가 현재 저장된 리전 ID (예: ap-northeast-2). "
+            "비어있으면 current_region과 동일하다고 가정."
+        ),
+    )
+
     # ── SSS 가중치 ────────────────────────────────────────────────────────
     w1: float = Field(default=DEFAULT_W1, ge=0.0, le=1.0, description="절감률 가중치")
     w2: float = Field(default=DEFAULT_W2, ge=0.0, le=1.0, description="재고 부족 리스크 가중치")
@@ -292,6 +311,9 @@ class RegionScore(BaseModel):
     latency_excluded: bool = False        # LIVE 모드에서 지연 초과로 배제됨
     cross_csp_excluded: bool = False      # LIVE + stateless=False 에서 Cross-CSP로 배제됨
     availability_zone: Optional[str] = None  # AZ 레벨 분리 시 세부 AZ (예: us-east-1a)
+    egress_cost_usd: float = 0.0          # 데이터 전송 비용 (dataset_size_gb > 0 일 때)
+    total_cost_with_egress_usd: float = 0.0  # GPU + 전력 + 이그레스 합산
+    egress_warning: bool = False          # 이그레스 비용이 GPU 절감액을 상쇄할 때 True
     sss_score: float
     is_recommended: bool = False
 
@@ -326,6 +348,43 @@ _POWER_REGION_MAP: dict[str, str] = {
 _GPU_POWER_KW = 0.70   # H100 SXM5 ≈ 700W (B200은 1000W이지만 동일 근사 사용)
 
 _NON_COMPLIANT_REGIONS: set[str] = set()
+
+# ---------------------------------------------------------------------------
+# 이그레스 요금표 (출발 리전 기준 $/GB, 첫 10TB 기준 근삿값)
+# 실제 요금: AWS $0.08~0.09, Lambda Labs $0.00, RunPod $0.00~0.01
+# ---------------------------------------------------------------------------
+_EGRESS_RATE_USD_PER_GB: dict[str, float] = {
+    # AWS 리전 (인터넷 전송 기준)
+    "ap-northeast-2": 0.08,   # 서울
+    "ap-northeast-1": 0.09,   # 도쿄
+    "ap-southeast-1": 0.09,   # 싱가포르
+    "us-east-1":      0.09,   # 버지니아
+    "us-east-2":      0.09,   # 오하이오
+    "us-west-1":      0.09,   # 캘리포니아
+    "us-west-2":      0.09,   # 오리건
+    "eu-west-1":      0.09,   # 아일랜드
+    "eu-central-1":   0.09,   # 프랑크푸르트
+    "eu-west-3":      0.09,   # 파리
+    "eu-north-1":     0.09,   # 스톡홀름
+    # Lambda Labs / RunPod: 이그레스 무료 또는 매우 저렴
+    "us-tx-3":        0.00,
+    "us-west-3":      0.00,
+    "ie-dublin":      0.00,
+    "runpod-us-l40":  0.01,
+    "runpod-eu-l40":  0.01,
+}
+_DEFAULT_EGRESS_RATE = 0.08   # 알 수 없는 리전 기본값
+
+
+def _egress_cost(source_region: str, dest_region: str, size_gb: float) -> float:
+    """
+    source_region → dest_region 데이터 전송 비용 계산.
+    같은 리전이면 0. size_gb=0 이면 0.
+    """
+    if size_gb <= 0 or source_region == dest_region:
+        return 0.0
+    rate = _EGRESS_RATE_USD_PER_GB.get(source_region, _DEFAULT_EGRESS_RATE)
+    return round(rate * size_gb, 4)
 
 
 class Solver:
@@ -580,6 +639,10 @@ class Solver:
         if not inventories:
             raise ValueError("No cloud inventory data available. All scrapers failed. Please retry later.")
 
+        # 이그레스 계산용 데이터 출처 리전
+        data_source  = req.data_source_region.strip() or req.current_region
+        dataset_gb   = req.dataset_size_gb
+
         # 현재 리전의 CSP 결정 (Cross-CSP 가드레일 기준점)
         current_provider: str = next(
             (inv.provider for inv in inventories if inv.region == req.current_region),
@@ -610,17 +673,23 @@ class Solver:
          revoc_probs, comp_viols, lat_viols,
          cross_csp_viols, latencies, power_prices_kwh) = ([] for _ in range(9))
 
+        egress_costs: list[float] = []
+
         for inv in inventories:
             power_price    = power_map.get(inv.region)
             total_cost     = self._compute_total_cost(inv, power_price, gpu_count, duration)
-            savings        = (baseline_cost - total_cost) / max(baseline_cost, 1e-9)
+            egress         = _egress_cost(data_source, inv.region, dataset_gb)
+            # 이그레스 포함 실제 총비용으로 절감률 재계산
+            real_total     = total_cost + egress
+            savings        = (baseline_cost - real_total) / max(baseline_cost, 1e-9)
             risk           = self._inventory_shortage_risk(inv.available_units, gpu_count)
             comp_viol      = self._is_compliance_violation(inv.region, req)
             lat_ms         = _get_latency(inv.region)
             lat_excl       = self._is_latency_excluded(lat_ms, req)
             cross_csp_excl = self._is_cross_csp_excluded(inv.provider, current_provider, req)
 
-            total_costs.append(total_cost)
+            total_costs.append(real_total)
+            egress_costs.append(egress)
             savings_rates.append(savings)
             inv_risks.append(risk)
             revoc_probs.append(inv.spot_revocation_probability)
@@ -641,6 +710,8 @@ class Solver:
             cross_csp_violations=np.array(cross_csp_viols),
         )
 
+        gpu_only_costs = [tc - ec for tc, ec in zip(total_costs, egress_costs)]
+
         candidates = [
             RegionScore(
                 region=inv.region,
@@ -650,10 +721,13 @@ class Solver:
                 on_demand_price_usd_per_hour=inv.on_demand_price_usd_per_hour,
                 spot_price_usd_per_hour=inv.spot_price_usd_per_hour,
                 power_price_usd_per_kwh=power_prices_kwh[i],
-                estimated_total_cost_usd=total_costs[i],
+                estimated_total_cost_usd=gpu_only_costs[i],
                 baseline_cost_usd=baseline_cost,
                 savings_pct=round(savings_rates[i] * 100, 2),
                 inventory_shortage_risk=inv_risks[i],
+                egress_cost_usd=round(egress_costs[i], 2),
+                total_cost_with_egress_usd=round(total_costs[i], 2),
+                egress_warning=(egress_costs[i] > 0 and egress_costs[i] >= (baseline_cost - gpu_only_costs[i])),
                 spot_revocation_probability=inv.spot_revocation_probability,
                 compliance_violation=bool(comp_viols[i]),
                 latency_ms=latencies[i],

@@ -296,6 +296,8 @@ async def quick_optimize(
     docker_command: str = Query(default="", description="도커 실행 명령어 (자동 감지용)"),
     latency_risk_ack: bool = Query(default=False, description="지연 리스크 인지 후 강행 여부"),
     stateless: bool = Query(default=False, description="Stateless 워크로드 여부 (Cross-CSP 허용)"),
+    dataset_gb: float = Query(default=0.0, ge=0.0, le=1000000.0, description="데이터셋 크기 GB (0=이그레스 무시)"),
+    data_source_region: str = Query(default="", description="데이터 저장 리전 (비어있으면 current_region)"),
 ):
     if _solver is None:
         raise HTTPException(status_code=503, detail="Solver not initialized.")
@@ -327,6 +329,8 @@ async def quick_optimize(
         docker_command=docker_command,
         latency_risk_acknowledged=latency_risk_ack,
         stateless=stateless,
+        dataset_size_gb=dataset_gb,
+        data_source_region=data_source_region,
     )
     async with _optimize_semaphore:
         try:

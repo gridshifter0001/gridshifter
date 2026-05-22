@@ -2,7 +2,7 @@
 
 H100 12대를 서울 리전에서 8시간 돌리면 약 $1,296 나옵니다. GridShifter는 전 세계 전력망 가격과 클라우드 GPU 재고를 실시간으로 비교해서 같은 작업을 더 싸게 할 수 있는 리전을 추천합니다. 텍사스 야간 풍력 잉여 시간대 + RunPod 유럽 리전 조합 시 $389까지 내려간 사례가 있습니다.
 
-**[대시보드 →](https://gridshifter0001.github.io/gridshifter/)**
+**[대시보드 →](https://gridshifter.app)**
 
 ---
 
@@ -40,7 +40,7 @@ GET  /api/v1/quick-optimize?gpu_count=4&job_hours=8&workload=batch
 POST /api/v1/optimize
 ```
 
-라이브 API: `https://gridshifter-production.up.railway.app`
+라이브 API: `https://api.gridshifter.app`
 
 ## 스택
 

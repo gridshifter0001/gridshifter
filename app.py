@@ -75,6 +75,8 @@ def _build_cors_origins() -> list[str]:
         "http://127.0.0.1:8080",
         "https://gridshifter-production.up.railway.app",
         "https://gridshifter0001.github.io",
+        "https://gridshifter.app",
+        "https://www.gridshifter.app",
     ]
     logger.info("CORS whitelist (default dev): %s", defaults)
     return defaults

@@ -546,7 +546,9 @@
 <footer>GridShifter AI MVP · API: <span id="api-base">https://api.gridshifter.app</span> · <span id="last-updated">—</span></footer>
 
 <script>
-const API = 'https://api.gridshifter.app';
+const API = location.hostname === 'gridshifter.app' || location.hostname === 'www.gridshifter.app'
+  ? 'https://gridshifter-production.up.railway.app'  // 커스텀 도메인 SSL 발급 완료 후 api.gridshifter.app으로 교체
+  : 'https://gridshifter-production.up.railway.app';
 let _currentWorkload  = 'batch';
 let _latencyRiskAck   = false;
 let _forceStateless   = false;

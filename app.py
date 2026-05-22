@@ -335,9 +335,29 @@ async def quick_optimize(
     async with _optimize_semaphore:
         try:
             loop = asyncio.get_event_loop()
-            return await loop.run_in_executor(
+            result = await loop.run_in_executor(
                 None, partial(_solver.find_optimized_routing, req)
             )
+            # 익명 피드백 자동 수집
+            if result.recommended:
+                rec = result.recommended
+                client_ip = request.headers.get("x-forwarded-for", "0.0.0.0").split(",")[0].strip()
+                ua = request.headers.get("user-agent", "")
+                record_feedback(FeedbackEvent(
+                    event_type="recommendation",
+                    session_id=_session_id(client_ip, ua),
+                    recommended_region=rec.region,
+                    estimated_cost_usd=rec.total_cost_with_egress_usd or rec.estimated_total_cost_usd,
+                    gpu_count=req.gpu_spec.count,
+                    job_hours=req.job_duration_hours,
+                    workload_type=req.workload_type.value,
+                    dataset_gb=req.dataset_size_gb,
+                    egress_cost_usd=rec.egress_cost_usd,
+                    provider=rec.provider,
+                    savings_pct=rec.savings_pct,
+                    sss_score=rec.sss_score,
+                ))
+            return result
         except Exception as exc:
             logger.exception("quick-optimize error: %s", exc)
             raise HTTPException(status_code=500, detail="Internal optimization error.")
@@ -450,6 +470,7 @@ from stripe_billing import (
     can_deploy, generate_api_key, get_plan_info,
     create_checkout_session, handle_webhook,
 )
+from feedback import FeedbackEvent, _session_id, record as record_feedback, get_stats
 
 
 class RegisterRequest(BaseModel):
@@ -516,6 +537,32 @@ async def create_checkout(body: CheckoutRequest):
         return {"checkout_url": url}
     except Exception as exc:
         raise HTTPException(500, str(exc))
+
+
+@app.get("/api/v1/stats", tags=["Analytics"])
+async def stats():
+    """수집된 익명 피드백 통계 (채택률, 절감률, 인기 리전 등)."""
+    return get_stats()
+
+
+class AdoptionFeedback(BaseModel):
+    session_id: str
+    recommended_region: str
+    adopted: bool
+    actual_cost_usd: float = 0.0
+
+
+@app.post("/api/v1/feedback/adoption", tags=["Analytics"])
+async def adoption_feedback(body: AdoptionFeedback):
+    """추천 채택 여부 피드백 수신 (대시보드에서 자동 호출)."""
+    record_feedback(FeedbackEvent(
+        event_type="adoption",
+        session_id=body.session_id,
+        recommended_region=body.recommended_region,
+        adopted=body.adopted,
+        actual_cost_usd=body.actual_cost_usd,
+    ))
+    return {"status": "recorded"}
 
 
 @app.post("/api/v1/billing/webhook", tags=["billing"], include_in_schema=False)
